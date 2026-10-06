@@ -21,7 +21,7 @@ app.use(helmet());
 app.use(cors({
   origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN.split(",").map(v => v.trim()),
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "X-DeviceLock-Token", "X-Client-Request-Id"]
+  allowedHeaders: ["Content-Type", "X-DeviceLock-Token", "X-Client-Request-Id", "X-OpenAI-Api-Key"]
 }));
 app.use(express.json({ limit: "256kb" }));
 
@@ -244,6 +244,11 @@ function extractToolCalls(data) {
   return calls.slice(0, 20);
 }
 
+function resolveOpenAiApiKey(req) {
+  const clientKey = req.get("X-OpenAI-Api-Key")?.trim();
+  return clientKey || OPENAI_API_KEY || "";
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -253,13 +258,15 @@ app.get("/health", (_req, res) => {
   });
 });
 
+// X-OpenAI-Api-Key is used only for the current HTTPS request and is never persisted by this server.
 app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
   try {
-    if (!OPENAI_API_KEY) {
+    const openAiApiKey = resolveOpenAiApiKey(req);
+    if (!openAiApiKey) {
       return res.status(503).json({
         ok: false,
-        error: "server_not_configured",
-        message: "OPENAI_API_KEY no está configurada en el servidor."
+        error: "openai_key_required",
+        message: "Se necesita una clave de OpenAI para procesar esta solicitud."
       });
     }
 
