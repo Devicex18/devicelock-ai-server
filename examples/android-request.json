@@ -1,0 +1,18 @@
+{
+  "message": "¿Cuánto de batería tengo y qué me recomiendas?",
+  "history": [
+    {"role": "user", "content": "Hola"},
+    {"role": "assistant", "content": "Hola, soy IA Optimización."}
+  ],
+  "context": {
+    "device": "HONOR ELI-NX9",
+    "androidVersion": "16",
+    "sdk": 36,
+    "batteryPercent": 31,
+    "charging": true,
+    "refreshRateHz": 120,
+    "maxRefreshRateHz": 120,
+    "ramAvailableMb": 2048,
+    "ramTotalMb": 7372
+  }
+}
