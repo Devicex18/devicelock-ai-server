@@ -21,7 +21,7 @@ app.use(helmet());
 app.use(cors({
   origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN.split(",").map(v => v.trim()),
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "X-DeviceLock-Token"]
+  allowedHeaders: ["Content-Type", "X-DeviceLock-Token", "X-Client-Request-Id"]
 }));
 app.use(express.json({ limit: "256kb" }));
 
@@ -113,7 +113,6 @@ function cleanContext(context) {
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(context, key)) {
       const value = context[key];
-
       if (
         typeof value === "string" ||
         typeof value === "number" ||
@@ -129,38 +128,94 @@ function cleanContext(context) {
 
 function buildInstructions(context) {
   const base = `
-Eres "IA Optimización", el asistente técnico de DeviceLock Tool.
+Eres "IA Optimización", el agente técnico de DeviceLock Tool.
 
-Tu trabajo es ayudar al usuario a entender y optimizar su dispositivo Android de forma realista.
+OBJETIVO:
+Ayuda al usuario a diagnosticar y optimizar su dispositivo Android de forma realista.
+Usa las herramientas estructuradas disponibles cuando necesites datos reales o una acción permitida.
 
 REGLAS:
 - Habla español claro, directo y natural.
 - No inventes datos del dispositivo.
 - Distingue una recomendación de una acción realmente ejecutada.
-- Nunca afirmes que cambiaste una configuración si la app no confirmó su ejecución.
+- Nunca afirmes que cambiaste una configuración si la herramienta no confirmó su ejecución y verificación.
 - Explica riesgos cuando una optimización pueda aumentar consumo, temperatura, inestabilidad o desgaste.
 - No prometas FPS o Hz que el hardware, panel o juego no puedan entregar.
-- Para acciones sensibles, primero analiza y pide confirmación.
+- Antes de cambios relevantes, la aplicación puede pedir confirmación al usuario; respeta el resultado.
 - El modelo NO tiene acceso directo a shell, Root, Shizuku ni al hardware.
-- Nunca generes ni solicites comandos shell para ejecución automática.
-- Las acciones futuras se implementarán mediante herramientas estructuradas y una lista estricta de operaciones permitidas.
-- Si el usuario pregunta por batería, memoria, Hz, temperatura u otro dato incluido en el contexto, usa esos datos.
+- Nunca generes comandos shell para ejecución automática.
+- Solo usa las funciones declaradas. No inventes nombres de herramientas.
+- Distingue Hz de FPS: cambiar Hz no garantiza FPS de juegos o aplicaciones.
+- Después de una modificación, verifica el estado resultante y explica si fue SUCCESS, PARTIAL, CANCELLED, FAILED, NOT_SUPPORTED o PERMISSION_REQUIRED.
 `;
 
   if (!context) return base;
 
   return base + `
-
-CONTEXTO DEL DISPOSITIVO:
+CONTEXTO INICIAL DEL DISPOSITIVO:
 ${JSON.stringify(context, null, 2)}
 `;
 }
 
+const TOOL_NAMES = new Set([
+  "get_device_diagnostics",
+  "get_display_info",
+  "get_battery_info",
+  "get_thermal_info",
+  "get_memory_info",
+  "get_storage_info",
+  "get_connection_info",
+  "get_app_inventory_summary",
+  "get_runtime_summary",
+  "get_package_info",
+  "read_setting",
+  "set_preferred_refresh_rate"
+]);
+
+function cleanTools(tools) {
+  if (!Array.isArray(tools)) return [];
+
+  return tools
+    .filter(tool =>
+      tool &&
+      tool.type === "function" &&
+      typeof tool.name === "string" &&
+      TOOL_NAMES.has(tool.name) &&
+      tool.parameters && typeof tool.parameters === "object"
+    )
+    .slice(0, 20)
+    .map(tool => ({
+      type: "function",
+      name: tool.name,
+      description: typeof tool.description === "string" ? tool.description.slice(0, 1200) : "",
+      strict: true,
+      parameters: tool.parameters
+    }));
+}
+
+function cleanToolOutputs(outputs) {
+  if (!Array.isArray(outputs)) return [];
+
+  return outputs
+    .filter(item =>
+      item &&
+      item.type === "function_call_output" &&
+      typeof item.call_id === "string" &&
+      item.call_id.length > 0 &&
+      typeof item.output === "string"
+    )
+    .slice(0, 20)
+    .map(item => ({
+      type: "function_call_output",
+      call_id: item.call_id.slice(0, 200),
+      output: item.output.slice(0, 12000)
+    }));
+}
+
 function extractOutputText(data) {
-  if (typeof data?.output_text === "string") return data.output_text;
+  if (typeof data?.output_text === "string") return data.output_text.trim();
 
   const parts = [];
-
   for (const item of data?.output || []) {
     for (const content of item?.content || []) {
       if (
@@ -173,6 +228,20 @@ function extractOutputText(data) {
   }
 
   return parts.join("\n").trim();
+}
+
+function extractToolCalls(data) {
+  const calls = [];
+  for (const item of data?.output || []) {
+    if (item?.type !== "function_call") continue;
+    if (typeof item.call_id !== "string" || typeof item.name !== "string") continue;
+    calls.push({
+      callId: item.call_id,
+      name: item.name,
+      arguments: typeof item.arguments === "string" ? item.arguments : "{}"
+    });
+  }
+  return calls.slice(0, 20);
 }
 
 app.get("/health", (_req, res) => {
@@ -194,37 +263,63 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
       });
     }
 
-    const message =
-      typeof req.body?.message === "string"
-        ? req.body.message.trim()
-        : "";
+    const previousResponseId =
+      typeof req.body?.previousResponseId === "string" && req.body.previousResponseId.trim()
+        ? req.body.previousResponseId.trim()
+        : null;
 
-    if (!message) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_message",
-        message: "El campo 'message' es obligatorio."
-      });
-    }
+    const toolOutputs = cleanToolOutputs(req.body?.toolOutputs);
+    const tools = cleanTools(req.body?.tools);
+    const isToolTurn = Boolean(previousResponseId && toolOutputs.length);
 
-    if (message.length > MAX_MESSAGE_CHARS) {
-      return res.status(413).json({
-        ok: false,
-        error: "message_too_large",
-        message: `El mensaje supera el límite de ${MAX_MESSAGE_CHARS} caracteres.`
-      });
-    }
+    let input;
+    let context = null;
 
-    const history = cleanHistory(req.body?.history);
-    const context = cleanContext(req.body?.context);
+    if (isToolTurn) {
+      input = toolOutputs;
+    } else {
+      const message =
+        typeof req.body?.message === "string"
+          ? req.body.message.trim()
+          : "";
 
-    const input = [
-      ...history,
-      {
-        role: "user",
-        content: message
+      if (!message) {
+        return res.status(400).json({
+          ok: false,
+          error: "invalid_message",
+          message: "El campo 'message' es obligatorio para iniciar una conversación."
+        });
       }
-    ];
+
+      if (message.length > MAX_MESSAGE_CHARS) {
+        return res.status(413).json({
+          ok: false,
+          error: "message_too_large",
+          message: `El mensaje supera el límite de ${MAX_MESSAGE_CHARS} caracteres.`
+        });
+      }
+
+      const history = cleanHistory(req.body?.history);
+      context = cleanContext(req.body?.context);
+      input = [
+        ...history,
+        {
+          role: "user",
+          content: message
+        }
+      ];
+    }
+
+    const requestBody = {
+      model: OPENAI_MODEL,
+      instructions: buildInstructions(context),
+      input,
+      tools,
+      tool_choice: tools.length ? "auto" : "none",
+      max_output_tokens: 1200
+    };
+
+    if (previousResponseId) requestBody.previous_response_id = previousResponseId;
 
     const openAiResponse = await fetch(OPENAI_RESPONSES_URL, {
       method: "POST",
@@ -232,16 +327,10 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
         "Authorization": `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        instructions: buildInstructions(context),
-        input,
-        max_output_tokens: 1200
-      })
+      body: JSON.stringify(requestBody)
     });
 
     const raw = await openAiResponse.text();
-
     let data;
     try {
       data = JSON.parse(raw);
@@ -265,18 +354,20 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
     }
 
     const answer = extractOutputText(data);
+    const toolCalls = extractToolCalls(data);
 
-    if (!answer) {
+    if (!answer && !toolCalls.length) {
       return res.status(502).json({
         ok: false,
         error: "empty_model_response",
-        message: "El modelo no devolvió texto."
+        message: "El modelo no devolvió texto ni una acción."
       });
     }
 
     return res.json({
       ok: true,
       answer,
+      toolCalls,
       model: data.model || OPENAI_MODEL,
       responseId: data.id || null
     });
