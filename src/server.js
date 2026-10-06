@@ -199,7 +199,7 @@ function cleanTools(tools) {
       TOOL_NAMES.has(tool.name) &&
       tool.parameters && typeof tool.parameters === "object"
     )
-    .slice(0, 20)
+    .slice(0, 64)
     .map(tool => ({
       type: "function",
       name: tool.name,
