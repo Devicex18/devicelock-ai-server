@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: devicelock-ai-server
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-6-luna
+      - key: OPENAI_RESPONSES_URL
+        value: https://api.openai.com/v1/responses
+      - key: APP_ACCESS_TOKEN
+        sync: false
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: MAX_MESSAGE_CHARS
+        value: "12000"
+      - key: RATE_LIMIT_MAX
+        value: "30"
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "60000"
