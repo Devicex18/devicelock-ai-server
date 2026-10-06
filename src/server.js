@@ -158,18 +158,34 @@ ${JSON.stringify(context, null, 2)}
 }
 
 const TOOL_NAMES = new Set([
+  "get_device_capabilities",
+  "audit_device",
   "get_device_diagnostics",
   "get_display_info",
   "get_battery_info",
   "get_thermal_info",
   "get_memory_info",
   "get_storage_info",
+  "get_power_info",
+  "get_animation_settings",
+  "get_network_info",
   "get_connection_info",
   "get_app_inventory_summary",
   "get_runtime_summary",
   "get_package_info",
+  "get_package_permissions",
+  "get_package_components",
+  "get_package_state",
+  "find_packages_by_name",
+  "probe_system_commands",
   "read_setting",
-  "set_preferred_refresh_rate"
+  "read_system_property",
+  "set_preferred_refresh_rate",
+  "set_animation_scale",
+  "set_screen_brightness",
+  "set_package_enabled",
+  "open_application",
+  "uninstall_package_for_user"
 ]);
 
 function cleanTools(tools) {
