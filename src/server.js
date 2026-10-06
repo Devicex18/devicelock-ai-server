@@ -179,6 +179,8 @@ const TOOL_NAMES = new Set([
   "find_packages_by_name",
   "probe_system_commands",
   "get_shell_command_catalog",
+  "get_torch_state",
+  "set_torch_mode",
   "read_setting",
   "read_system_property",
   "set_preferred_refresh_rate",
