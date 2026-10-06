@@ -1,0 +1,19 @@
+{
+  "name": "devicelock-ai-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure backend proxy for DeviceLock Tool IA Optimización",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0"
+  }
+}
