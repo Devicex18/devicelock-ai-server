@@ -178,6 +178,7 @@ const TOOL_NAMES = new Set([
   "get_package_state",
   "find_packages_by_name",
   "probe_system_commands",
+  "get_shell_command_catalog",
   "read_setting",
   "read_system_property",
   "set_preferred_refresh_rate",
