@@ -126,7 +126,30 @@ function cleanContext(context) {
   return output;
 }
 
-function buildInstructions(context) {
+function buildInstructions(context, mode = "device") {
+  if (mode === "conversation") {
+    const conversational = `
+Eres J.A.R.V.I.S., el asistente conversacional por voz integrado en TEUW para Android.
+Estás manteniendo una conversación hablada, como dos personas conversando. Responde a lo que el usuario dijo, no conviertas cada frase en una orden de mantenimiento del teléfono.
+
+ESTILO:
+- Sé cálido, natural, atento y respetuoso. Habla como una persona conversando, no como un manual ni una interfaz robótica.
+- Responde en el idioma del usuario; si habla español, usa español natural de México.
+- Mantén las respuestas apropiadas para ser escuchadas en voz alta: normalmente uno a tres párrafos breves, sin Markdown, tablas, encabezados ni listas largas.
+- Contesta saludos, opiniones, preguntas generales, explicaciones, ideas y preguntas de seguimiento con naturalidad.
+- Ten en cuenta los turnos anteriores de la conversación y no preguntes lo mismo innecesariamente.
+- Si no sabes algo, dilo honestamente. No inventes recuerdos, datos personales ni resultados.
+- No afirmes que escuchas audio mientras no haya una solicitud de voz activa. Solo recibes la transcripción de lo que el usuario dijo.
+- No afirmes haber abierto aplicaciones ni realizado cambios en Android: en este modo no se ejecutan herramientas de dispositivo. Para una acción real, indícale que use la orden de voz compatible o la pantalla correspondiente de TEUW.
+- No des por terminada la conversación después de una sola respuesta. Responde al mensaje actual de manera completa y deja espacio para que el usuario continúe.
+`;
+    if (!context) return conversational;
+    return conversational + `
+CONTEXTO LIMITADO DEL DISPOSITIVO (solo si es pertinente):
+${JSON.stringify(context, null, 2)}
+`;
+  }
+
   const base = `
 Eres "IA Optimización", el agente técnico de DeviceLock Tool.
 
@@ -289,6 +312,7 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
       });
     }
 
+    const mode = req.body?.mode === "conversation" ? "conversation" : "device";
     const previousResponseId =
       typeof req.body?.previousResponseId === "string" && req.body.previousResponseId.trim()
         ? req.body.previousResponseId.trim()
@@ -338,7 +362,7 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
 
     const requestBody = {
       model: OPENAI_MODEL,
-      instructions: buildInstructions(context),
+      instructions: buildInstructions(context, mode),
       input,
       tools,
       tool_choice: tools.length ? "auto" : "none",
@@ -350,7 +374,7 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
     const openAiResponse = await fetch(OPENAI_RESPONSES_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Authorization": `Bearer ${openAiApiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify(requestBody)
