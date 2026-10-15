@@ -349,15 +349,22 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
         });
       }
 
-      const history = cleanHistory(req.body?.history);
-      context = cleanContext(req.body?.context);
-      input = [
-        ...history,
-        {
-          role: "user",
-          content: message
-        }
-      ];
+      // Responses API continuation already carries the previous assistant turn.
+      // Send only the newest user message in conversational mode to avoid duplicating history.
+      const conversationContinuation = mode === "conversation" && Boolean(previousResponseId);
+      context = mode === "conversation" ? null : cleanContext(req.body?.context);
+      if (conversationContinuation) {
+        input = [{ role: "user", content: message }];
+      } else {
+        const history = cleanHistory(req.body?.history);
+        input = [
+          ...history,
+          {
+            role: "user",
+            content: message
+          }
+        ];
+      }
     }
 
     const requestBody = {
