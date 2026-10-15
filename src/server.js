@@ -465,6 +465,76 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
   }
 });
 
+// Natural voice output. The client's OpenAI key is used only for this request and never stored.
+app.post("/v1/ai/speech", rateLimit, requireAppToken, async (req, res) => {
+  try {
+    const openAiApiKey = resolveOpenAiApiKey(req);
+    if (!openAiApiKey) {
+      return res.status(503).json({
+        ok: false,
+        error: "openai_key_required",
+        message: "Se necesita una clave de OpenAI para generar la voz natural."
+      });
+    }
+
+    const input = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!input) {
+      return res.status(400).json({ ok: false, error: "invalid_text", message: "El texto es obligatorio." });
+    }
+    if (input.length > 1800) {
+      return res.status(413).json({ ok: false, error: "text_too_large", message: "La respuesta hablada no puede superar 1800 caracteres." });
+    }
+
+    const allowedVoices = new Set(["coral", "shimmer", "nova", "alloy", "sage"]);
+    const requestedVoice = typeof req.body?.voice === "string" ? req.body.voice : "coral";
+    const voice = allowedVoices.has(requestedVoice) ? requestedVoice : "coral";
+    const requestedSpeed = Number(req.body?.speed ?? 1.08);
+    const speed = Number.isFinite(requestedSpeed) ? Math.max(0.85, Math.min(1.25, requestedSpeed)) : 1.08;
+
+    const speechResponse = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${openAiApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini-tts",
+        voice,
+        input,
+        instructions: "Speak in natural Mexican Spanish with a warm, adult feminine-sounding voice. Sound friendly, present and conversational, with clear pronunciation and subtle emotion. Avoid a robotic, exaggerated announcer style. Keep the delivery brisk but comfortable.",
+        response_format: "mp3",
+        speed
+      })
+    });
+
+    if (!speechResponse.ok) {
+      const body = await speechResponse.text();
+      let data = null;
+      try { data = JSON.parse(body); } catch { data = null; }
+      console.error("OpenAI speech error:", speechResponse.status, data?.error?.type || "tts_error");
+      return res.status(502).json({
+        ok: false,
+        error: "speech_generation_failed",
+        message: data?.error?.message || "No se pudo generar la voz natural.",
+        status: speechResponse.status
+      });
+    }
+
+    const audio = Buffer.from(await speechResponse.arrayBuffer());
+    if (!audio.length || audio.length > 12 * 1024 * 1024) {
+      return res.status(502).json({ ok: false, error: "invalid_audio", message: "La respuesta de audio estaba vacía o excedía el límite." });
+    }
+    res.set("Content-Type", "audio/mpeg");
+    res.set("Content-Length", String(audio.length));
+    res.set("Cache-Control", "no-store");
+    res.set("X-TEUW-Voice", voice);
+    return res.status(200).send(audio);
+  } catch (error) {
+    console.error("Speech server error:", error?.message || "unknown_error");
+    return res.status(500).json({ ok: false, error: "speech_server_error", message: "No se pudo generar el audio." });
+  }
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`DeviceLock AI Server listening on port ${PORT}`);
 });
