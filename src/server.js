@@ -490,8 +490,13 @@ app.post("/v1/ai/speech", rateLimit, requireAppToken, async (req, res) => {
     const allowedVoices = new Set(["coral", "shimmer", "nova", "alloy", "sage"]);
     const requestedVoice = typeof req.body?.voice === "string" ? req.body.voice : "coral";
     const voice = allowedVoices.has(requestedVoice) ? requestedVoice : "coral";
-    const requestedSpeed = Number(req.body?.speed ?? 1.08);
-    const speed = Number.isFinite(requestedSpeed) ? Math.max(0.85, Math.min(1.25, requestedSpeed)) : 1.08;
+    const requestedSpeed = Number(req.body?.speed ?? 1.14);
+    const speed = Number.isFinite(requestedSpeed) ? Math.max(0.85, Math.min(1.25, requestedSpeed)) : 1.14;
+    const requestedLanguage = typeof req.body?.language === "string" ? req.body.language.toLowerCase() : "es-mx";
+    const language = requestedLanguage.startsWith("en") ? "en-US" : "es-MX";
+    const speechInstructions = language === "en-US"
+      ? "Speak in natural United States English with a warm, adult feminine-sounding voice. Sound friendly and conversational, with clear pronunciation and subtle emotion. Avoid a robotic or exaggerated announcer style. Keep the delivery brisk but comfortable."
+      : "Habla en español natural de México con una voz adulta femenina, cálida y conversacional. Pronuncia con claridad y usa una emoción sutil. Evita sonar robótica o como locutora exagerada. Mantén un ritmo ágil pero cómodo.";
 
     const speechResponse = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
@@ -503,7 +508,7 @@ app.post("/v1/ai/speech", rateLimit, requireAppToken, async (req, res) => {
         model: "gpt-4o-mini-tts",
         voice,
         input,
-        instructions: "Speak in natural Mexican Spanish with a warm, adult feminine-sounding voice. Sound friendly, present and conversational, with clear pronunciation and subtle emotion. Avoid a robotic, exaggerated announcer style. Keep the delivery brisk but comfortable.",
+        instructions: speechInstructions,
         response_format: "mp3",
         speed
       })
