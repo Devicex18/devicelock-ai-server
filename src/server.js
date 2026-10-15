@@ -6,7 +6,8 @@ const app = express();
 
 const PORT = Number(process.env.PORT || 8080);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-6-luna";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+const OPENAI_VOICE_MODEL = process.env.OPENAI_VOICE_MODEL || "gpt-5-mini";
 const OPENAI_RESPONSES_URL =
   process.env.OPENAI_RESPONSES_URL || "https://api.openai.com/v1/responses";
 const APP_ACCESS_TOKEN = process.env.APP_ACCESS_TOKEN || "";
@@ -319,7 +320,8 @@ app.get("/health", (_req, res) => {
     ok: true,
     service: "devicelock-ai-server",
     configured: Boolean(OPENAI_API_KEY),
-    model: OPENAI_MODEL
+    model: OPENAI_MODEL,
+    voiceModel: OPENAI_VOICE_MODEL
   });
 });
 
@@ -394,12 +396,12 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
     }
 
     const requestBody = {
-      model: OPENAI_MODEL,
+      model: mode === "assistant" ? OPENAI_VOICE_MODEL : OPENAI_MODEL,
       instructions: buildInstructions(context, mode),
       input,
       tools,
       tool_choice: tools.length ? "auto" : "none",
-      max_output_tokens: mode === "assistant" || mode === "conversation" ? 550 : 1200
+      max_output_tokens: mode === "assistant" ? 380 : mode === "conversation" ? 450 : 1200
     };
 
     if (previousResponseId) requestBody.previous_response_id = previousResponseId;
