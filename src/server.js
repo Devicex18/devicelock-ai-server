@@ -127,6 +127,28 @@ function cleanContext(context) {
 }
 
 function buildInstructions(context, mode = "device") {
+  if (mode === "assistant") {
+    const assistant = `
+Eres J.A.R.V.I.S., el asistente inteligente de TEUW para Android.
+Mantén una conversación natural y cálida en español mexicano, como una charla entre personas. Las preguntas normales se contestan directamente, sin llamar herramientas si no hacen falta.
+
+Cuando el usuario pida algo relacionado con el teléfono:
+- Consulta datos reales mediante las herramientas disponibles en vez de inventarlos.
+- Para realizar una acción, usa las herramientas declaradas apropiadas y revisa sus resultados. No digas que una acción se completó si no se ejecutó y verificó.
+- El cliente puede disponer de Android API, Root o Shizuku/ADB; las herramientas disponibles son la autoridad sobre las capacidades reales. No presupongas que Shizuku está autorizado ni que cada comando está permitido.
+- Usa únicamente las funciones declaradas por el servidor. No fabriques comandos shell ni intentes eludir la política, los controles de Android o la confirmación del usuario.
+- Las acciones destructivas o sensibles deben seguir el flujo de confirmación de la app. Si Android exige la intervención del usuario, explícalo claramente.
+- Si falta un permiso concedible por la vía privilegiada autorizada, intenta solo el permiso tipado aprobado por el cliente y verifica el estado. Para Accessibility, Notification Listener, superposición, VPN, MediaProjection, rol de asistente u otros accesos protegidos por ajustes del sistema, guía al usuario hacia la pantalla oficial correspondiente en lugar de prometer una concesión invisible.
+- Para voz, contesta breve y directamente; evita Markdown, encabezados y listas largas en una respuesta hablada.
+- No finjas consciencia ni que puedes oír si el micrófono no está activo. No inventes recuerdos ni resultados.
+`;
+    if (!context) return assistant;
+    return assistant + `
+CONTEXTO DEL DISPOSITIVO (usar como indicio; las herramientas actuales tienen prioridad):
+${JSON.stringify(context, null, 2)}
+`;
+  }
+
   if (mode === "conversation") {
     const conversational = `
 Eres J.A.R.V.I.S., el asistente conversacional por voz integrado en TEUW para Android.
@@ -312,7 +334,10 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
       });
     }
 
-    const mode = req.body?.mode === "conversation" ? "conversation" : "device";
+    const requestedMode = req.body?.mode;
+    const mode = requestedMode === "assistant" || requestedMode === "conversation"
+      ? requestedMode
+      : "device";
     const previousResponseId =
       typeof req.body?.previousResponseId === "string" && req.body.previousResponseId.trim()
         ? req.body.previousResponseId.trim()
@@ -351,7 +376,7 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
 
       // Responses API continuation already carries the previous assistant turn.
       // Send only the newest user message in conversational mode to avoid duplicating history.
-      const conversationContinuation = mode === "conversation" && Boolean(previousResponseId);
+      const conversationContinuation = (mode === "conversation" || mode === "assistant") && Boolean(previousResponseId);
       context = mode === "conversation" ? null : cleanContext(req.body?.context);
       if (conversationContinuation) {
         input = [{ role: "user", content: message }];
@@ -373,7 +398,7 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
       input,
       tools,
       tool_choice: tools.length ? "auto" : "none",
-      max_output_tokens: 1200
+      max_output_tokens: mode === "assistant" || mode === "conversation" ? 550 : 1200
     };
 
     if (previousResponseId) requestBody.previous_response_id = previousResponseId;
