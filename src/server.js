@@ -229,6 +229,7 @@ const TOOL_NAMES = new Set([
   "read_setting",
   "read_system_property",
   "set_preferred_refresh_rate",
+  "set_max_refresh_rate",
   "set_animation_scale",
   "set_screen_brightness",
   "set_package_enabled",
