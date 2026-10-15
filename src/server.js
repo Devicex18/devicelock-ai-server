@@ -487,16 +487,23 @@ app.post("/v1/ai/speech", rateLimit, requireAppToken, async (req, res) => {
       return res.status(413).json({ ok: false, error: "text_too_large", message: "La respuesta hablada no puede superar 1800 caracteres." });
     }
 
-    const allowedVoices = new Set(["coral", "shimmer", "nova", "alloy", "sage"]);
-    const requestedVoice = typeof req.body?.voice === "string" ? req.body.voice : "coral";
-    const voice = allowedVoices.has(requestedVoice) ? requestedVoice : "coral";
-    const requestedSpeed = Number(req.body?.speed ?? 1.14);
-    const speed = Number.isFinite(requestedSpeed) ? Math.max(0.85, Math.min(1.25, requestedSpeed)) : 1.14;
+    // Keep this in sync with AssistantSettingsStore and OpenAiSpeechClient.
+    // Marin/Cedar are recommended in the OpenAI TTS guide for output quality.
+    const allowedVoices = new Set([
+      "alloy", "ash", "ballad", "coral", "echo", "fable",
+      "marin", "cedar", "nova", "onyx", "sage", "shimmer", "verse"
+    ]);
+    const requestedVoice = typeof req.body?.voice === "string" ? req.body.voice : "marin";
+    const voice = allowedVoices.has(requestedVoice) ? requestedVoice : "marin";
+    const requestedSpeed = Number(req.body?.speed ?? 1.0);
+    const speed = Number.isFinite(requestedSpeed)
+      ? Math.max(0.85, Math.min(1.15, requestedSpeed))
+      : 1.0;
     const requestedLanguage = typeof req.body?.language === "string" ? req.body.language.toLowerCase() : "es-mx";
     const language = requestedLanguage.startsWith("en") ? "en-US" : "es-MX";
     const speechInstructions = language === "en-US"
-      ? "Speak in natural United States English with a warm, adult feminine-sounding voice. Sound friendly and conversational, with clear pronunciation and subtle emotion. Avoid a robotic or exaggerated announcer style. Keep the delivery brisk but comfortable."
-      : "Habla en español natural de México con una voz adulta femenina, cálida y conversacional. Pronuncia con claridad y usa una emoción sutil. Evita sonar robótica o como locutora exagerada. Mantén un ritmo ágil pero cómodo.";
+      ? "Use a warm, adult feminine-sounding voice in natural US English. Speak as if talking to one person, not reading an announcement. Use varied but subtle intonation, natural pauses, gentle emotional nuance, and a relaxed conversational rhythm. Avoid flat, mechanical, overly polished, or exaggerated announcer delivery. Do not add words that are not in the text."
+      : "Habla con una voz de mujer adulta, cálida y conversacional, en español natural de México. Suena como si estuvieras hablando directamente con una persona de confianza, no leyendo un anuncio. Usa entonación variada, pausas naturales y emoción sutil; mantén un ritmo medio y relajado. Evita sonar como GPS, robot, locutora o lectura mecánica. No exageres la dulzura ni agregues palabras que no estén en el texto.";
 
     const speechResponse = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
