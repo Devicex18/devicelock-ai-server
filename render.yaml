@@ -11,6 +11,8 @@ services:
         sync: false
       - key: OPENAI_MODEL
         value: gpt-6-luna
+      - key: OPENAI_VOICE_MODEL
+        value: gpt-5-mini
       - key: OPENAI_RESPONSES_URL
         value: https://api.openai.com/v1/responses
       - key: APP_ACCESS_TOKEN
