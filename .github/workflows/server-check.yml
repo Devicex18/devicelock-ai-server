@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "test/**"
       - "package.json"
       - ".github/workflows/server-check.yml"
   pull_request:
     branches: [main]
     paths:
       - "src/**"
+      - "test/**"
       - "package.json"
       - ".github/workflows/server-check.yml"
 
@@ -25,5 +27,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - name: Run unit tests
+        run: npm test
       - name: Check server syntax
         run: node --check src/server.js
