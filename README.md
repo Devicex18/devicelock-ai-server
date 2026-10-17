@@ -5,7 +5,8 @@ Backend para conectar **DeviceLock Tool → IA Optimización → OpenAI Response
 ## Funciones
 
 - La API key de OpenAI vive únicamente en el servidor.
-- `GET /health` comprueba el servicio.
+- `GET /health` comprueba el servicio sin llamar al modelo.
+- `POST /v1/ai/verify-key` comprueba la autenticación de una clave de cliente con `GET /v1/models` de OpenAI; no genera texto y tiene timeout de 5 segundos.
 - `POST /v1/ai/chat` recibe mensaje, historial y contexto del dispositivo.
 - Filtra y limita el contexto aceptado.
 - Incluye rate limiting básico.
