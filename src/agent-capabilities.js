@@ -10,7 +10,7 @@ function normalizeSource(value) {
   }
   if (url.protocol !== "https:" || !url.hostname) return null;
   const title = typeof value.title === "string"
-    ? value.title.replace(/[\\r\\n\\t]+/g, " ").trim().slice(0, 180)
+    ? value.title.replace(/[\r\n\t]+/g, " ").trim().slice(0, 180)
     : "";
   return { title: title || url.hostname, url: url.toString() };
 }
@@ -49,9 +49,9 @@ export function appendSourcesToAnswer(answer, sources, mode = "device") {
     return cleanAnswer;
   }
   const lines = sources.slice(0, MAX_SOURCE_URLS).map((source, index) =>
-    `${index + 1}. ${String(source.title || source.url).replace(/[\\r\\n\\t]+/g, " ").slice(0, 180)} — ${source.url}`
+    `${index + 1}. ${String(source.title || source.url).replace(/[\r\n\t]+/g, " ").slice(0, 180)} — ${source.url}`
   );
-  return `${cleanAnswer}\\n\\nFuentes consultadas:\\n${lines.join("\\n")}`;
+  return `${cleanAnswer}\n\nFuentes consultadas:\n${lines.join("\n")}`;
 }
 
 export function isWebSearchEnabled(configValue, endpoint) {
