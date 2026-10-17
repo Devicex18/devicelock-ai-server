@@ -316,6 +316,7 @@ function resolveOpenAiApiKey(req) {
 }
 
 app.get("/health", (_req, res) => {
+  res.set("Cache-Control", "no-store");
   res.json({
     ok: true,
     service: "devicelock-ai-server",
@@ -323,6 +324,85 @@ app.get("/health", (_req, res) => {
     model: OPENAI_MODEL,
     voiceModel: OPENAI_VOICE_MODEL
   });
+});
+
+// Check a client-provided OpenAI key without generating text or waiting for an LLM response.
+app.post("/v1/ai/verify-key", rateLimit, requireAppToken, async (req, res) => {
+  const openAiApiKey = req.get("X-OpenAI-Api-Key")?.trim();
+  if (!openAiApiKey) {
+    return res.status(400).json({
+      ok: false,
+      valid: false,
+      error: "client_api_key_required",
+      message: "Introduce la clave API de OpenAI."
+    });
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const upstream = await fetch("https://api.openai.com/v1/models", {
+      method: "GET",
+      headers: {
+        "Authorization": \`Bearer \${openAiApiKey}\`,
+        "Accept": "application/json"
+      },
+      signal: controller.signal
+    });
+
+    // No model data is needed; discard the catalogue body as soon as headers arrive.
+    try {
+      await upstream.body?.cancel();
+    } catch {
+      // Closing a response body is best-effort and must not affect the credential result.
+    }
+
+    if (upstream.ok) {
+      res.set("Cache-Control", "no-store");
+      return res.status(200).json({
+        ok: true,
+        valid: true,
+        message: "OpenAI aceptó la clave API."
+      });
+    }
+
+    if (upstream.status === 401 || upstream.status === 403) {
+      return res.status(401).json({
+        ok: false,
+        valid: false,
+        error: "invalid_api_key",
+        message: "OpenAI rechazó la clave API o no tiene permisos suficientes."
+      });
+    }
+
+    if (upstream.status === 429) {
+      return res.status(429).json({
+        ok: false,
+        valid: false,
+        error: "openai_rate_limit",
+        message: "OpenAI limitó la verificación. Espera unos segundos e inténtalo de nuevo."
+      });
+    }
+
+    return res.status(502).json({
+      ok: false,
+      valid: false,
+      error: "openai_verification_failed",
+      message: \`OpenAI devolvió HTTP \${upstream.status} al validar la clave.\`
+    });
+  } catch (error) {
+    const timedOut = error?.name === "AbortError" || error?.name === "TimeoutError";
+    return res.status(timedOut ? 504 : 502).json({
+      ok: false,
+      valid: false,
+      error: timedOut ? "openai_verification_timeout" : "openai_verification_unavailable",
+      message: timedOut
+        ? "OpenAI tardó más de 5 segundos en responder a la verificación."
+        : "No se pudo contactar con OpenAI para verificar la clave."
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 });
 
 // X-OpenAI-Api-Key is used only for the current HTTPS request and is never persisted by this server.
