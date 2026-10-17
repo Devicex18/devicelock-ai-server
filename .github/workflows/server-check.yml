@@ -1,0 +1,29 @@
+name: DeviceLock AI Server Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "package.json"
+      - ".github/workflows/server-check.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "package.json"
+      - ".github/workflows/server-check.yml"
+
+jobs:
+  syntax:
+    name: Validate Node.js syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check server syntax
+        run: node --check src/server.js
