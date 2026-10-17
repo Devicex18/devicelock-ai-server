@@ -38,13 +38,20 @@ async function withHttpServer(app, callback) {
 
 async function withMockedFetch(status, callback) {
   const previousFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    error: {
-      type: status === 429 ? "rate_limit_error" : status === 404 ? "invalid_request_error" : "api_error",
-      code: status === 401 || status === 403 ? "invalid_api_key" : status === 429 ? "rate_limit_exceeded" : status === 404 ? "model_not_found" : "server_error",
-      message: "Provider test payload must not be returned verbatim."
+  globalThis.fetch = async (input, init) => {
+    const requestUrl = typeof input === "string" ? input : input?.url;
+    // Keep the test's own localhost request real and mock only the server's outbound provider call.
+    if (typeof requestUrl === "string" && requestUrl.startsWith("http://127.0.0.1:")) {
+      return previousFetch(input, init);
     }
-  }), { status, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({
+      error: {
+        type: status === 429 ? "rate_limit_error" : status === 404 ? "invalid_request_error" : "api_error",
+        code: status === 401 || status === 403 ? "invalid_api_key" : status === 429 ? "rate_limit_exceeded" : status === 404 ? "model_not_found" : "server_error",
+        message: "Provider test payload must not be returned verbatim."
+      }
+    }), { status, headers: { "Content-Type": "application/json" } });
+  };
   try { await callback(); }
   finally { globalThis.fetch = previousFetch; }
 }
