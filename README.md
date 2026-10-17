@@ -11,20 +11,26 @@ Backend para conectar **DeviceLock Tool → IA Optimización → OpenAI Response
 - Filtra y limita el contexto aceptado.
 - Incluye rate limiting básico.
 - Nunca entrega la API key al APK.
-- El modelo no ejecuta comandos del teléfono.
+- El servidor no ejecuta comandos del teléfono: el modelo solo propone llamadas estructuradas; el cliente Android valida cada herramienta, exige la autorización/confirmación local que corresponda y verifica los resultados.
 
 ## Modelo
 
-El valor inicial es `gpt-6-luna`. Está configurado como variable de entorno para poder cambiarlo sin modificar la app.
+El valor predeterminado real del código es `gpt-5-mini`; el modelo efectivo se configura mediante `OPENAI_MODEL`. `/health` informa la configuración predeterminada y cada respuesta de chat incluye el modelo reportado por el proveedor.
+
+## Búsqueda web y tiempos de espera
+
+`WEB_SEARCH_ENABLED=true` activa la herramienta real `web_search` de Responses API. Si la variable no está definida, se habilita automáticamente solo para el endpoint oficial `https://api.openai.com/v1/responses`; para endpoints de terceros debe activarse explícitamente después de verificar compatibilidad. `WEB_SEARCH_ENABLED=false` la desactiva. Las respuestas de texto añaden URLs únicamente cuando el proveedor devuelve referencias reales de búsqueda. `AI_REQUEST_TIMEOUT_MS` limita la espera entre 5 y 120 segundos.
 
 ## Variables
 
 ```env
 OPENAI_API_KEY=TU_CLAVE
-OPENAI_MODEL=gpt-6-luna
+OPENAI_MODEL=gpt-5-mini
 OPENAI_RESPONSES_URL=https://api.openai.com/v1/responses
 PORT=8080
 APP_ACCESS_TOKEN=
+WEB_SEARCH_ENABLED=true
+AI_REQUEST_TIMEOUT_MS=45000
 ```
 
 ## Probar localmente
@@ -81,7 +87,7 @@ Response:
 {
   "ok": true,
   "answer": "Tienes 31% de batería y el teléfono está cargando.",
-  "model": "gpt-6-luna",
+  "model": "gpt-5-mini",
   "responseId": "resp_..."
 }
 ```
@@ -99,6 +105,6 @@ Nunca pongas `OPENAI_API_KEY` en:
 
 La clave debe existir como secreto del backend.
 
-## Próxima fase
+## Límites de la arquitectura
 
-Streaming, conversaciones persistentes, herramientas estructuradas y acciones seguras mediante Shizuku/Root. Las acciones deben estar en una allowlist; nunca se deben ejecutar comandos shell arbitrarios enviados por el modelo.
+El backend conserva una lista explícita de nombres de herramientas estructuradas y nunca recibe acceso directo a Shizuku/Root. El cliente Android implementa el ejecutor general del shell en su rama de desarrollo: la ejecución sigue limitada al Root/Shizuku que el usuario autorizó, con análisis de riesgo, confirmación, límites de salida/tiempo y verificación posterior. El cliente ADB de escritorio y sus operaciones de host no se convierten en comandos del shell remoto.
