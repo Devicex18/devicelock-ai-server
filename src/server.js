@@ -344,7 +344,7 @@ app.post("/v1/ai/verify-key", rateLimit, requireAppToken, async (req, res) => {
     const upstream = await fetch("https://api.openai.com/v1/models", {
       method: "GET",
       headers: {
-        "Authorization": \`Bearer \${openAiApiKey}\`,
+        "Authorization": `Bearer ${openAiApiKey}`,
         "Accept": "application/json"
       },
       signal: controller.signal
@@ -388,7 +388,7 @@ app.post("/v1/ai/verify-key", rateLimit, requireAppToken, async (req, res) => {
       ok: false,
       valid: false,
       error: "openai_verification_failed",
-      message: \`OpenAI devolvió HTTP \${upstream.status} al validar la clave.\`
+      message: `OpenAI devolvió HTTP ${upstream.status} al validar la clave.`
     });
   } catch (error) {
     const timedOut = error?.name === "AbortError" || error?.name === "TimeoutError";
