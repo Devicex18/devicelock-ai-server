@@ -328,10 +328,17 @@ function resolveOpenAiApiKey(req) {
 
 app.get("/health", (_req, res) => {
   res.set("Cache-Control", "no-store");
+  const serverApiKeyConfigured = Boolean(OPENAI_API_KEY?.trim());
   res.json({
     ok: true,
     service: "devicelock-ai-server",
-    configured: Boolean(OPENAI_API_KEY),
+    // Backward compatible: "configured" still means a server-managed key exists.
+    // It is not a health signal and does not describe a key sent by an individual client.
+    configured: serverApiKeyConfigured,
+    serverApiKeyConfigured,
+    // /v1/ai/chat accepts X-OpenAI-Api-Key per HTTPS request; this advertises capability,
+    // not that a particular client key is valid or that the provider is currently healthy.
+    acceptsClientApiKey: true,
     model: OPENAI_MODEL,
     voiceModel: OPENAI_VOICE_MODEL,
     capabilities: { webSearch: WEB_SEARCH_ENABLED, structuredDeviceTools: true },
@@ -671,6 +678,11 @@ app.post("/v1/ai/speech", rateLimit, requireAppToken, async (req, res) => {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`DeviceLock AI Server listening on port ${PORT}`);
-});
+// Export the app for local HTTP integration tests without binding a port on import.
+export { app };
+
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`DeviceLock AI Server listening on port ${PORT}`);
+  });
+}
