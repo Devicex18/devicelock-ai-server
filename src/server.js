@@ -547,14 +547,35 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
     }
 
     if (!openAiResponse.ok) {
-      // Do not log or relay raw provider payloads: they may echo user content or credentials.
-      console.error("OpenAI request failed:", openAiResponse.status, data?.error?.type || data?.error?.code || "provider_error");
+      // Do not log or relay raw provider payloads: upstream bodies can contain user data.
+      // Only publish a bounded classification derived from the numeric HTTP status.
+      const providerStatus = openAiResponse.status;
+      const providerError = providerStatus === 401 || providerStatus === 403
+        ? "openai_auth_error"
+        : providerStatus === 429
+          ? "openai_rate_limit"
+          : providerStatus === 404
+            ? "openai_model_endpoint_error"
+            : providerStatus >= 500
+              ? "openai_provider_unavailable"
+              : "openai_error";
+      console.error("OpenAI request failed:", providerStatus, providerError);
+
+      const message = providerError === "openai_auth_error"
+        ? "OpenAI rechazó la clave API o los permisos de la cuenta."
+        : providerError === "openai_rate_limit"
+          ? "OpenAI alcanzó un límite de uso o cuota. Revisa la facturación y los límites de tu cuenta."
+          : providerError === "openai_model_endpoint_error"
+            ? "El modelo o endpoint configurado no está disponible en este proveedor."
+            : providerError === "openai_provider_unavailable"
+              ? "El proveedor de IA presenta un error temporal."
+              : "El proveedor rechazó la solicitud. Comprueba la configuración e inténtalo de nuevo.";
 
       return res.status(502).json({
         ok: false,
-        error: "openai_error",
-        message: "OpenAI rechazó la solicitud. Comprueba la clave, el modelo y que el endpoint admita las herramientas configuradas.",
-        status: openAiResponse.status,
+        error: providerError,
+        message,
+        status: providerStatus,
         webSearchAvailable: WEB_SEARCH_ENABLED
       });
     }
