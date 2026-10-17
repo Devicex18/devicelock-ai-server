@@ -11,7 +11,7 @@ Backend para conectar **DeviceLock Tool → IA Optimización → OpenAI Response
 - Filtra y limita el contexto aceptado.
 - Incluye rate limiting básico.
 - Nunca entrega la API key al APK.
-- El modelo no ejecuta comandos del teléfono.
+- El servidor no ejecuta comandos del teléfono: el modelo solo propone llamadas estructuradas; el cliente Android valida cada herramienta, exige la autorización/confirmación local que corresponda y verifica los resultados.
 
 ## Modelo
 
@@ -87,7 +87,7 @@ Response:
 {
   "ok": true,
   "answer": "Tienes 31% de batería y el teléfono está cargando.",
-  "model": "gpt-6-luna",
+  "model": "gpt-5-mini",
   "responseId": "resp_..."
 }
 ```
@@ -105,6 +105,6 @@ Nunca pongas `OPENAI_API_KEY` en:
 
 La clave debe existir como secreto del backend.
 
-## Próxima fase
+## Límites de la arquitectura
 
-Streaming, conversaciones persistentes, herramientas estructuradas y acciones seguras mediante Shizuku/Root. Las acciones deben estar en una allowlist; nunca se deben ejecutar comandos shell arbitrarios enviados por el modelo.
+El backend conserva una lista explícita de nombres de herramientas estructuradas y nunca recibe acceso directo a Shizuku/Root. El cliente Android implementa el ejecutor general del shell en su rama de desarrollo: la ejecución sigue limitada al Root/Shizuku que el usuario autorizó, con análisis de riesgo, confirmación, límites de salida/tiempo y verificación posterior. El cliente ADB de escritorio y sus operaciones de host no se convierten en comandos del shell remoto.
