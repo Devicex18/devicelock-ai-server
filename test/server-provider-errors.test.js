@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-async function loadApp() {
+async function loadApp(serverKey = "", moduleSuffix = "default") {
   const previous = {
     nodeEnv: process.env.NODE_ENV,
     serverKey: process.env.OPENAI_API_KEY,
@@ -9,9 +9,10 @@ async function loadApp() {
   };
   process.env.NODE_ENV = "test";
   process.env.APP_ACCESS_TOKEN = "";
-  delete process.env.OPENAI_API_KEY;
+  if (serverKey) process.env.OPENAI_API_KEY = serverKey;
+  else delete process.env.OPENAI_API_KEY;
   try {
-    return (await import("../src/server.js?provider-errors-test")).app;
+    return (await import(`../src/server.js?provider-errors-test=${moduleSuffix}`)).app;
   } finally {
     if (previous.nodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previous.nodeEnv;
@@ -55,6 +56,50 @@ async function withMockedFetch(status, callback) {
   try { await callback(); }
   finally { globalThis.fetch = previousFetch; }
 }
+
+test("a new client API key takes precedence over the server fallback for each chat request", async () => {
+  const serverKey = "sk-server-fallback-secret-never-used";
+  const clientKey = "sk-client-current-key-must-win";
+  const app = await loadApp(serverKey, "client-key-precedence");
+  const previousFetch = globalThis.fetch;
+  let authorizationSeen = null;
+  globalThis.fetch = async (input, init) => {
+    const requestUrl = typeof input === "string" ? input : input?.url;
+    if (typeof requestUrl === "string" && requestUrl.startsWith("http://127.0.0.1:")) {
+      return previousFetch(input, init);
+    }
+    authorizationSeen = new Headers(init?.headers).get("Authorization");
+    return new Response(JSON.stringify({
+      id: "resp-client-key-priority",
+      model: "gpt-test-model",
+      output_text: "ok"
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    await withHttpServer(app, async baseUrl => {
+      const response = await fetch(`${baseUrl}/v1/ai/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-OpenAI-Api-Key": clientKey
+        },
+        body: JSON.stringify({ message: "test", mode: "conversation" })
+      });
+      assert.equal(response.status, 200);
+      const serialized = await response.text();
+      const body = JSON.parse(serialized);
+      assert.equal(body.ok, true);
+      assert.equal(body.answer, "ok");
+      assert.equal(body.model, "gpt-test-model");
+      assert.equal(authorizationSeen, `Bearer ${clientKey}`);
+      assert.notEqual(authorizationSeen, `Bearer ${serverKey}`);
+      assert.equal(serialized.includes(clientKey), false);
+      assert.equal(serialized.includes(serverKey), false);
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
 
 const scenarios = [
   { status: 401, error: "openai_auth_error", message: /rechazó la clave API/i },
