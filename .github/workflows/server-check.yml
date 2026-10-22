@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "cloudflare/worker.js"
       - "package.json"
       - ".github/workflows/server-check.yml"
   pull_request:
