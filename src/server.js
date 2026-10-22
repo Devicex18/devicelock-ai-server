@@ -489,6 +489,10 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
 
     let input;
     let context = null;
+    // Keep the server-selected model/capability pair in route scope: it is needed both while
+    // validating an image and later when constructing/forwarding the actual provider request.
+    const selectedModel = mode === "assistant" ? OPENAI_VOICE_MODEL : OPENAI_MODEL;
+    const selectedCapabilities = resolveModelCapabilities(selectedModel);
 
     if (isToolTurn) {
       input = toolOutputs;
@@ -518,8 +522,6 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
       if (imageResult.error) {
         return res.status(imageResult.error.status).json({ ok: false, error: imageResult.error.code, message: imageResult.error.message });
       }
-      const selectedModel = mode === "assistant" ? OPENAI_VOICE_MODEL : OPENAI_MODEL;
-      const selectedCapabilities = resolveModelCapabilities(selectedModel);
       if (imageResult.images.length &&
           (!selectedCapabilities.verified || !supportsImageInput(selectedModel))) {
         const capabilityUnknown = !selectedCapabilities.verified;
