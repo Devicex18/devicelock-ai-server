@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { resolveModelCapabilities, supportsImageInput } from "./model-capabilities.js";
 
 const app = express();
 
@@ -112,12 +113,6 @@ function cleanImages(value) {
     images.push({ type: "input_image", image_url: `data:${mimeType};base64,${data}` });
   }
   return { images, error: null };
-}
-
-function supportsImageInput(model) {
-  const id = String(model || "").trim().toLowerCase();
-  if (!id || id.includes("gpt-oss") || /embedding|moderation|rerank|transcrib|tts|audio/.test(id)) return false;
-  return /gpt-(?:4o|4[.]1|4[.]5|5|6)|(?:^|[/:])o[134](?:[-.]|$)|gemini-(?:1[.]5|2|2[.]5|3|4|5)|claude-(?:3|4|5)|claude-(?:sonnet|opus|haiku)-[345]|grok-(?:2-vision|[3-9])|pixtral|qwen[^/]*vl|llama[^/]*(?:vision|4-(?:scout|maverick))|llava|phi-3[.]5-vision/.test(id);
 }
 
 function cleanContext(context) {
@@ -360,7 +355,9 @@ app.get("/health", (_req, res) => {
     service: "devicelock-ai-server",
     configured: Boolean(OPENAI_API_KEY),
     model: OPENAI_MODEL,
-    voiceModel: OPENAI_VOICE_MODEL
+    voiceModel: OPENAI_VOICE_MODEL,
+    modelCapabilities: resolveModelCapabilities(OPENAI_MODEL),
+    voiceModelCapabilities: resolveModelCapabilities(OPENAI_VOICE_MODEL)
   });
 });
 
@@ -500,11 +497,16 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
         return res.status(imageResult.error.status).json({ ok: false, error: imageResult.error.code, message: imageResult.error.message });
       }
       const selectedModel = mode === "assistant" ? OPENAI_VOICE_MODEL : OPENAI_MODEL;
-      if (imageResult.images.length && !supportsImageInput(selectedModel)) {
+      const selectedCapabilities = resolveModelCapabilities(selectedModel);
+      if (imageResult.images.length &&
+          (!selectedCapabilities.verified || !supportsImageInput(selectedModel))) {
+        const capabilityUnknown = !selectedCapabilities.verified;
         return res.status(422).json({
           ok: false,
-          error: "model_vision_not_supported",
-          message: "El modelo configurado en el servidor no está identificado como compatible con imágenes. No se envió la fotografía al modelo."
+          error: capabilityUnknown ? "model_vision_capability_unknown" : "model_vision_not_supported",
+          message: capabilityUnknown
+            ? "La capacidad de entrada de imágenes de este modelo no está verificada. No se envió la fotografía."
+            : "El modelo configurado en el servidor no admite entrada de imágenes. No se envió la fotografía."
         });
       }
       const userContent = imageResult.images.length

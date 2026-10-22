@@ -27,5 +27,9 @@ jobs:
           node-version: "20"
       - name: Check server syntax
         run: node --check src/server.js
+      - name: Check exact model capability registry syntax
+        run: node --check src/model-capabilities.js
+      - name: Run model capability tests
+        run: npm test
       - name: Check deployed Cloudflare Worker syntax
         run: node --check cloudflare/worker.js

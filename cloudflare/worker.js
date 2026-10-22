@@ -106,10 +106,30 @@ function cleanImages(value) {
   }
   return {images,error:null};
 }
-function supportsImageInput(model) {
+// This standalone Worker mirrors src/model-capabilities.js: exact IDs only; unknown IDs fail closed.
+const IMAGE_INPUT_MODELS = new Set([
+  "gpt-4o","gpt-4o-mini","gpt-4-turbo","gpt-4o-2024-05-13","gpt-4o-2024-08-06",
+  "gpt-4o-2024-11-20","gpt-4o-mini-2024-07-18","gpt-4-turbo-2024-04-09",
+  "gpt-4.1","gpt-4.1-mini","gpt-4.1-nano","gpt-4.1-2025-04-14",
+  "gpt-4.1-mini-2025-04-14","gpt-4.1-nano-2025-04-14",
+  "gpt-5","gpt-5-mini","gpt-5-nano","gpt-5-2025-08-07","gpt-5-mini-2025-08-07",
+  "gpt-5-nano-2025-08-07","gpt-5.1","gpt-5.1-mini","gpt-5.1-nano",
+  "gpt-5.2","gpt-5.2-mini","gpt-5.2-nano","o3","o4-mini"
+]);
+const TEXT_ONLY_MODELS = new Set([
+  "gpt-oss-120b","gpt-oss-20b","gpt-3.5-turbo","gpt-3.5-turbo-0125",
+  "text-embedding-3-small","text-embedding-3-large","text-embedding-ada-002",
+  "whisper-1","tts-1","tts-1-hd","moderation-latest"
+]);
+function resolveModelCapabilities(model) {
   const id=String(model||"").trim().toLowerCase();
-  if(!id||id.includes("gpt-oss")||/embedding|moderation|rerank|transcrib|tts|audio/.test(id)) return false;
-  return /gpt-(?:4o|4[.]1|4[.]5|5|6)|(?:^|[/:])o[134](?:[-.]|$)/.test(id);
+  if(IMAGE_INPUT_MODELS.has(id)) return {verified:true,inputModalities:["text","image"],outputModalities:["text"],source:"teuw-verified-openai-model-registry-v1"};
+  if(TEXT_ONLY_MODELS.has(id)) return {verified:true,inputModalities:["text"],outputModalities:["text"],source:"teuw-verified-openai-model-registry-v1"};
+  return {verified:false,inputModalities:[],outputModalities:[],source:"unknown"};
+}
+function supportsImageInput(model) {
+  const capabilities=resolveModelCapabilities(model);
+  return capabilities.verified&&capabilities.inputModalities.includes("image");
 }
 
 function webEnabled(env,endpoint) {
@@ -143,7 +163,7 @@ async function handle(request,env) {
   if(request.method==="GET"&&(path==="/health"||path==="/")) {
     const endpoint=String(env.OPENAI_RESPONSES_URL||"https://api.openai.com/v1/responses");
     const key=Boolean(String(env.OPENAI_API_KEY||"").trim());
-    return json({ok:true,service:"teuw-ai-server",configured:key,serverApiKeyConfigured:key,acceptsClientApiKey:true,model:String(env.OPENAI_MODEL||"gpt-5-mini"),voiceModel:String(env.OPENAI_VOICE_MODEL||"gpt-5-mini"),capabilities:{webSearch:webEnabled(env,endpoint),structuredDeviceTools:true},requestTimeoutMs:Math.max(5000,Math.min(120000,Number(env.AI_REQUEST_TIMEOUT_MS||45000)))});
+    return json({ok:true,service:"teuw-ai-server",configured:key,serverApiKeyConfigured:key,acceptsClientApiKey:true,model:String(env.OPENAI_MODEL||"gpt-5-mini"),voiceModel:String(env.OPENAI_VOICE_MODEL||"gpt-5-mini"),modelCapabilities:resolveModelCapabilities(String(env.OPENAI_MODEL||"gpt-5-mini")),voiceModelCapabilities:resolveModelCapabilities(String(env.OPENAI_VOICE_MODEL||"gpt-5-mini")),capabilities:{webSearch:webEnabled(env,endpoint),structuredDeviceTools:true},requestTimeoutMs:Math.max(5000,Math.min(120000,Number(env.AI_REQUEST_TIMEOUT_MS||45000)))});
   }
   if(request.method!=="POST"||!["/v1/ai/verify-key","/v1/ai/chat","/v1/ai/speech"].includes(path)) return json({ok:false,error:"not_found",message:"Ruta no encontrada."},404);
   if(isLimited(request,env)) return json({ok:false,error:"rate_limit",message:"Demasiadas solicitudes. Intenta de nuevo en un momento."},429);
@@ -179,7 +199,11 @@ async function handle(request,env) {
       if(msg.length>maxChars) return json({ok:false,error:"message_too_large",message:"El mensaje supera el límite de "+maxChars+" caracteres."},413);
        const imageResult=cleanImages(body.images);
        if(imageResult.error) return json({ok:false,error:imageResult.error.code,message:imageResult.error.message},imageResult.error.status);
-       if(imageResult.images.length&&!supportsImageInput(selectedModel)) return json({ok:false,error:"model_vision_not_supported",message:"El modelo configurado en el servidor no está identificado como compatible con imágenes. No se envió la fotografía al modelo."},422);
+       const selectedCapabilities=resolveModelCapabilities(selectedModel);
+        if(imageResult.images.length&&(!selectedCapabilities.verified||!supportsImageInput(selectedModel))) {
+          const capabilityUnknown=!selectedCapabilities.verified;
+          return json({ok:false,error:capabilityUnknown?"model_vision_capability_unknown":"model_vision_not_supported",message:capabilityUnknown?"La capacidad de entrada de imágenes de este modelo no está verificada. No se envió la fotografía.":"El modelo configurado en el servidor no admite entrada de imágenes. No se envió la fotografía."},422);
+        }
        const userContent=imageResult.images.length?[{type:"input_text",text:msg},...imageResult.images]:msg;
       const continuation=(mode==="conversation"||mode==="assistant")&&Boolean(prev);
       context=mode==="conversation"?null:cleanContext(body.context);
