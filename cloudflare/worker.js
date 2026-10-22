@@ -129,7 +129,7 @@ function safeProviderMessage(value,key) {
   let message=String(value||"");
   if(typeof key==="string"&&key.length) message=message.split(key).join("[clave oculta]");
   return message
-    .replace(/(?i)sk-(?:proj-)?[A-Za-z0-9_-]{12,}/g,"[clave oculta]")
+    .replace(/sk-(?:proj-)?[A-Za-z0-9_-]{12,}/gi,"[clave oculta]")
     .replace(/data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi,"[datos de imagen omitidos]")
     .replace(/[A-Za-z0-9+/]{256,}={0,2}/g,"[datos omitidos]")
     .replace(/[\r\n\t]+/g," ")
