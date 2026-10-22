@@ -117,7 +117,7 @@ function cleanImages(value) {
 function supportsImageInput(model) {
   const id = String(model || "").trim().toLowerCase();
   if (!id || id.includes("gpt-oss") || /embedding|moderation|rerank|transcrib|tts|audio/.test(id)) return false;
-  return /gpt-(?:4o|4\\.1|4\\.5|5|6)|(?:^|[/:])o[134](?:[-.]|$)|gemini-(?:1\\.5|2|2\\.5|3|4|5)|claude-(?:3|4|5)|claude-(?:sonnet|opus|haiku)-[345]|grok-(?:2-vision|[3-9])|pixtral|qwen[^/]*vl|llama[^/]*(?:vision|4-(?:scout|maverick))|llava|phi-3\\.5-vision/.test(id);
+  return /gpt-(?:4o|4[.]1|4[.]5|5|6)|(?:^|[/:])o[134](?:[-.]|$)|gemini-(?:1[.]5|2|2[.]5|3|4|5)|claude-(?:3|4|5)|claude-(?:sonnet|opus|haiku)-[345]|grok-(?:2-vision|[3-9])|pixtral|qwen[^/]*vl|llama[^/]*(?:vision|4-(?:scout|maverick))|llava|phi-3[.]5-vision/.test(id);
 }
 
 function cleanContext(context) {
