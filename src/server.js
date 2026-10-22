@@ -13,6 +13,8 @@ const OPENAI_RESPONSES_URL =
 const APP_ACCESS_TOKEN = process.env.APP_ACCESS_TOKEN || "";
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 const MAX_MESSAGE_CHARS = Number(process.env.MAX_MESSAGE_CHARS || 12000);
+const MAX_IMAGE_COUNT = 4;
+const MAX_IMAGE_BYTES = 900_000;
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 30);
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
 
@@ -24,7 +26,7 @@ app.use(cors({
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "X-DeviceLock-Token", "X-Client-Request-Id", "X-OpenAI-Api-Key"]
 }));
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({ limit: "7mb" }));
 
 const buckets = new Map();
 
@@ -80,6 +82,42 @@ function cleanHistory(history) {
       role: item.role,
       content: item.content.slice(0, MAX_MESSAGE_CHARS)
     }));
+}
+
+
+/** Validate bounded, in-memory Base64 images without logging their contents. */
+function cleanImages(value) {
+  if (value == null) return { images: [], error: null };
+  if (!Array.isArray(value)) {
+    return { images: [], error: { status: 400, code: "invalid_images", message: "Las imágenes deben enviarse como una lista." } };
+  }
+  if (value.length > MAX_IMAGE_COUNT) {
+    return { images: [], error: { status: 413, code: "too_many_images", message: `Se admiten hasta ${MAX_IMAGE_COUNT} imágenes por mensaje.` } };
+  }
+  const images = [];
+  for (const image of value) {
+    const mimeType = image?.mimeType;
+    const data = image?.data;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType) ||
+        typeof data !== "string" ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(data) ||
+        data.length % 4 !== 0) {
+      return { images: [], error: { status: 400, code: "invalid_image_format", message: "Una imagen tiene un formato inválido. Usa JPEG, PNG o WebP." } };
+    }
+    const bytes = Buffer.from(data, "base64");
+    if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES ||
+        bytes.toString("base64").replace(/=+$/, "") !== data.replace(/=+$/, "")) {
+      return { images: [], error: { status: 413, code: "image_too_large_or_invalid", message: "Una imagen está vacía, dañada o supera el límite de 900 KB." } };
+    }
+    images.push({ type: "input_image", image_url: `data:${mimeType};base64,${data}` });
+  }
+  return { images, error: null };
+}
+
+function supportsImageInput(model) {
+  const id = String(model || "").trim().toLowerCase();
+  if (!id || id.includes("gpt-oss") || /embedding|moderation|rerank|transcrib|tts|audio/.test(id)) return false;
+  return /gpt-(?:4o|4\\.1|4\\.5|5|6)|(?:^|[/:])o[134](?:[-.]|$)|gemini-(?:1\\.5|2|2\\.5|3|4|5)|claude-(?:3|4|5)|claude-(?:sonnet|opus|haiku)-[345]|grok-(?:2-vision|[3-9])|pixtral|qwen[^/]*vl|llama[^/]*(?:vision|4-(?:scout|maverick))|llava|phi-3\\.5-vision/.test(id);
 }
 
 function cleanContext(context) {
@@ -457,26 +495,42 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
         });
       }
 
+      const imageResult = cleanImages(req.body?.images);
+      if (imageResult.error) {
+        return res.status(imageResult.error.status).json({ ok: false, error: imageResult.error.code, message: imageResult.error.message });
+      }
+      const selectedModel = mode === "assistant" ? OPENAI_VOICE_MODEL : OPENAI_MODEL;
+      if (imageResult.images.length && !supportsImageInput(selectedModel)) {
+        return res.status(422).json({
+          ok: false,
+          error: "model_vision_not_supported",
+          message: "El modelo configurado en el servidor no está identificado como compatible con imágenes. No se envió la fotografía al modelo."
+        });
+      }
+      const userContent = imageResult.images.length
+        ? [{ type: "input_text", text: message }, ...imageResult.images]
+        : message;
+
       // Responses API continuation already carries the previous assistant turn.
       // Send only the newest user message in conversational mode to avoid duplicating history.
       const conversationContinuation = (mode === "conversation" || mode === "assistant") && Boolean(previousResponseId);
       context = mode === "conversation" ? null : cleanContext(req.body?.context);
       if (conversationContinuation) {
-        input = [{ role: "user", content: message }];
+        input = [{ role: "user", content: userContent }];
       } else {
         const history = cleanHistory(req.body?.history);
         input = [
           ...history,
           {
             role: "user",
-            content: message
+            content: userContent
           }
         ];
       }
     }
 
     const requestBody = {
-      model: mode === "assistant" ? OPENAI_VOICE_MODEL : OPENAI_MODEL,
+      model: selectedModel,
       instructions: buildInstructions(context, mode),
       input,
       tools,
