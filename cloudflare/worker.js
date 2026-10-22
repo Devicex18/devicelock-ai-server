@@ -209,6 +209,7 @@ async function handle(request,env) {
     const prev=typeof body.previousResponseId==="string"&&body.previousResponseId.trim()?body.previousResponseId.trim():null;
     const outputs=cleanToolOutputs(body.toolOutputs),tools=cleanTools(body.tools),isToolTurn=Boolean(prev&&outputs.length);
     const selectedModel=mode==="assistant"?String(env.OPENAI_VOICE_MODEL||"gpt-5-mini"):String(env.OPENAI_MODEL||"gpt-5-mini");
+    const selectedCapabilities=resolveModelCapabilities(selectedModel);
     let input,context=null;
     if(isToolTurn) input=outputs;
     else {
@@ -217,8 +218,7 @@ async function handle(request,env) {
       if(msg.length>maxChars) return json({ok:false,error:"message_too_large",message:"El mensaje supera el límite de "+maxChars+" caracteres."},413);
        const imageResult=cleanImages(body.images);
        if(imageResult.error) return json({ok:false,error:imageResult.error.code,message:imageResult.error.message},imageResult.error.status);
-       const selectedCapabilities=resolveModelCapabilities(selectedModel);
-        if(imageResult.images.length&&(!selectedCapabilities.verified||!supportsImageInput(selectedModel))) {
+       if(imageResult.images.length&&(!selectedCapabilities.verified||!supportsImageInput(selectedModel))) {
           const capabilityUnknown=!selectedCapabilities.verified;
           return json({ok:false,error:capabilityUnknown?"model_vision_capability_unknown":"model_vision_not_supported",message:capabilityUnknown?"La capacidad de entrada de imágenes de este modelo no está verificada. No se envió la fotografía.":"El modelo configurado en el servidor no admite entrada de imágenes. No se envió la fotografía."},422);
         }
