@@ -601,11 +601,14 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
     }
 
     if (!openAiResponse.ok) {
-      console.error(
-        "OpenAI error:",
-        openAiResponse.status,
-        data || raw.slice(0, 500)
-      );
+      // Provider error bodies may echo request fragments. Log only the HTTP status and a
+      // machine-readable error code; never write response bodies or user/image content to logs.
+      console.error(JSON.stringify({
+        event: "teuw_multimodal_provider_error",
+        httpStatus: openAiResponse.status,
+        errorCode: typeof data?.error?.code === "string" ? data.error.code.slice(0, 80) : "provider_error",
+        imageCount: outgoingImageStats.imageCount
+      }));
 
       return res.status(502).json({
         ok: false,
