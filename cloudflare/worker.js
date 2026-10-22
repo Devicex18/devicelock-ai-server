@@ -124,6 +124,21 @@ function cleanImages(value) {
   }
   return {images,error:null};
 }
+/** Return bounded provider diagnostics with credentials, image data and long encoded blobs removed. */
+function safeProviderMessage(value,key) {
+  let message=String(value||"");
+  if(typeof key==="string"&&key.length) message=message.split(key).join("[clave oculta]");
+  return message
+    .replace(/(?i)sk-(?:proj-)?[A-Za-z0-9_-]{12,}/g,"[clave oculta]")
+    .replace(/data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi,"[datos de imagen omitidos]")
+    .replace(/[A-Za-z0-9+/]{256,}={0,2}/g,"[datos omitidos]")
+    .replace(/[\r\n\t]+/g," ")
+    .trim()
+    .slice(0,240);
+}
+function safeProviderCode(value) {
+  return String(value||"").replace(/[^A-Za-z0-9_.:\/-]/g,"").slice(0,80);
+}
 // This standalone Worker mirrors src/model-capabilities.js: exact IDs only; unknown IDs fail closed.
 const IMAGE_INPUT_MODELS = new Set([
   "gpt-4o","gpt-4o-mini","gpt-4-turbo","gpt-4o-2024-05-13","gpt-4o-2024-08-06",
@@ -240,12 +255,19 @@ async function handle(request,env) {
     let upstream,raw;
     try { upstream=await fetchWithTimeout(endpoint,{method:"POST",headers:{Authorization:"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify(payload)},Math.max(5000,Math.min(120000,Number(env.AI_REQUEST_TIMEOUT_MS||45000)))); raw=await upstream.text(); }
     catch(e) { const timed=e?.name==="AbortError"||e?.name==="TimeoutError"; return json({ok:false,error:timed?"ai_request_timeout":"server_error",message:timed?"La solicitud de IA excedió el tiempo máximo permitido.":"No se pudo contactar con el proveedor de IA."},timed?504:502); }
-    console.info(JSON.stringify({event:"teuw_multimodal_provider_response",model:selectedModel,httpStatus:upstream.status,imageCount:outgoingImageStats.imageCount}));
+    console.info(JSON.stringify({event:"teuw_multimodal_provider_response",model:selectedModel,httpStatus:upstream.status,imageCount:outgoingImageStats.imageCount,clientRequestId:safeProviderCode(request.headers.get("X-Client-Request-Id"))}));
     let data; try { data=JSON.parse(raw); } catch { data=null; }
     if(!upstream.ok) {
-      const s=upstream.status,err=(s===401||s===403)?"openai_auth_error":s===429?"openai_rate_limit":s===404?"openai_model_endpoint_error":s>=500?"openai_provider_unavailable":"openai_error";
-      const msg=err==="openai_auth_error"?"OpenAI rechazó la clave API o los permisos de la cuenta.":err==="openai_rate_limit"?"OpenAI alcanzó un límite de uso o cuota. Revisa la facturación y los límites de tu cuenta.":err==="openai_model_endpoint_error"?"El modelo o endpoint configurado no está disponible en este proveedor.":err==="openai_provider_unavailable"?"El proveedor de IA presenta un error temporal.":"El proveedor rechazó la solicitud. Comprueba la configuración e inténtalo de nuevo.";
-      return json({ok:false,error:err,message:msg,status:s,webSearchAvailable:search},502);
+      const s=upstream.status,err=(s===401||s===403)?"openai_auth_error":s===429?"openai_rate_limit":s===404?"openai_model_endpoint_error":s===413?"openai_payload_error":s>=500?"openai_provider_unavailable":"openai_error";
+      const upstreamError=data?.error&&typeof data.error==="object"?data.error:{};
+      const providerErrorCode=safeProviderCode(upstreamError.code);
+      const providerErrorType=safeProviderCode(upstreamError.type);
+      const providerMessage=safeProviderMessage(upstreamError.message||data?.message,key);
+      const providerRequestId=safeProviderCode(upstream.headers.get("x-request-id")||upstream.headers.get("request-id"));
+      const clientRequestId=safeProviderCode(request.headers.get("X-Client-Request-Id"));
+      console.error(JSON.stringify({event:"teuw_multimodal_provider_error",httpStatus:s,topLevelError:err,providerErrorCode:providerErrorCode||"unknown",providerErrorType:providerErrorType||"unknown",imageCount:outgoingImageStats.imageCount,clientRequestId,providerRequestId:providerRequestId||"unknown"}));
+      const msg=err==="openai_auth_error"?"OpenAI rechazó la clave API o los permisos de la cuenta.":err==="openai_rate_limit"?"OpenAI alcanzó un límite de uso o cuota. Revisa la facturación y los límites de tu cuenta.":err==="openai_model_endpoint_error"?"El modelo o endpoint configurado no está disponible en este proveedor.":err==="openai_payload_error"?"El proveedor rechazó el tamaño de la solicitud o de la imagen.":err==="openai_provider_unavailable"?"OpenAI respondió con un error del servidor.":"El proveedor rechazó la solicitud. Comprueba el formato y la configuración.";
+      return json({ok:false,error:err,message:msg,status:s,providerErrorCode:providerErrorCode||null,providerErrorType:providerErrorType||null,providerMessage:providerMessage||null,providerRequestId:providerRequestId||null,clientRequestId:clientRequestId||null,webSearchAvailable:search},502);
     }
     const answerRaw=extractOutputText(data),webUsed=search&&(data?.output||[]).some(x=>x?.type==="web_search_call"),sources=webUsed?getSources(data):[],answer=appendSources(answerRaw,sources,mode),toolCalls=extractToolCalls(data);
     if(!answer&&!toolCalls.length) return json({ok:false,error:"empty_model_response",message:"El modelo no devolvió texto ni una acción."},502);
