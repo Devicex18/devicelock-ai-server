@@ -27,3 +27,5 @@ jobs:
           node-version: "20"
       - name: Check server syntax
         run: node --check src/server.js
+      - name: Check deployed Cloudflare Worker syntax
+        run: node --check cloudflare/worker.js
