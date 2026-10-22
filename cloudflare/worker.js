@@ -70,6 +70,24 @@ function cleanToolOutputs(outputs) {
   if(!Array.isArray(outputs)) return [];
   return outputs.filter(x=>x&&x.type==="function_call_output"&&typeof x.call_id==="string"&&x.call_id.length>0&&typeof x.output==="string").slice(0,20).map(x=>({type:"function_call_output",call_id:x.call_id.slice(0,200),output:x.output.slice(0,12000)}));
 }
+// Safe forwarding telemetry: logs only verified image count/MIME/encoded length, never image data or text.
+function imageStatsFromResponsesInput(input) {
+  let imageCount=0, encodedCharacters=0;
+  const mimeTypes=new Set();
+  for(const item of Array.isArray(input)?input:[]) {
+    for(const part of Array.isArray(item?.content)?item.content:[]) {
+      if(part?.type!=="input_image"||typeof part.image_url!=="string") continue;
+      const value=part.image_url;
+      if(!value.startsWith("data:image/")) continue;
+      const comma=value.indexOf(",");
+      if(comma<0) continue;
+      const mime=value.slice(5,comma).split(";")[0].toLowerCase();
+      if(!["image/jpeg","image/png","image/webp"].includes(mime)) continue;
+      imageCount++; mimeTypes.add(mime); encodedCharacters+=value.length-comma-1;
+    }
+  }
+  return {imageCount,mimeTypes:[...mimeTypes].sort(),encodedCharacters};
+}
 function extractOutputText(data) {
   if(typeof data?.output_text==="string") return data.output_text.trim();
   const parts=[];
@@ -217,9 +235,12 @@ async function handle(request,env) {
     const payload={model:selectedModel,instructions:instructions,input:input,tools:requestTools,tool_choice:requestTools.length?"auto":"none",max_output_tokens:mode==="assistant"?380:mode==="conversation"?450:1200};
     if(search) payload.include=["web_search_call.action.sources"];
     if(prev) payload.previous_response_id=prev;
+    const outgoingImageStats=imageStatsFromResponsesInput(payload.input);
+    console.info(JSON.stringify({event:"teuw_multimodal_request",model:selectedModel,imageCount:outgoingImageStats.imageCount,mimeTypes:outgoingImageStats.mimeTypes,encodedCharacters:outgoingImageStats.encodedCharacters,capabilityVerified:selectedCapabilities.verified,capabilitySource:selectedCapabilities.source}));
     let upstream,raw;
     try { upstream=await fetchWithTimeout(endpoint,{method:"POST",headers:{Authorization:"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify(payload)},Math.max(5000,Math.min(120000,Number(env.AI_REQUEST_TIMEOUT_MS||45000)))); raw=await upstream.text(); }
     catch(e) { const timed=e?.name==="AbortError"||e?.name==="TimeoutError"; return json({ok:false,error:timed?"ai_request_timeout":"server_error",message:timed?"La solicitud de IA excedió el tiempo máximo permitido.":"No se pudo contactar con el proveedor de IA."},timed?504:502); }
+    console.info(JSON.stringify({event:"teuw_multimodal_provider_response",model:selectedModel,httpStatus:upstream.status,imageCount:outgoingImageStats.imageCount}));
     let data; try { data=JSON.parse(raw); } catch { data=null; }
     if(!upstream.ok) {
       const s=upstream.status,err=(s===401||s===403)?"openai_auth_error":s===429?"openai_rate_limit":s===404?"openai_model_endpoint_error":s>=500?"openai_provider_unavailable":"openai_error";

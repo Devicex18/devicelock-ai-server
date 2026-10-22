@@ -115,6 +115,28 @@ function cleanImages(value) {
   return { images, error: null };
 }
 
+/** Safe image forwarding telemetry: no message text, image URL/Base64, API key or response body. */
+function imageStatsFromResponsesInput(input) {
+  let imageCount = 0;
+  let encodedCharacters = 0;
+  const mimeTypes = new Set();
+  for (const item of Array.isArray(input) ? input : []) {
+    for (const part of Array.isArray(item?.content) ? item.content : []) {
+      if (part?.type !== "input_image" || typeof part.image_url !== "string") continue;
+      const value = part.image_url;
+      if (!value.startsWith("data:image/")) continue;
+      const comma = value.indexOf(",");
+      if (comma < 0) continue;
+      const mime = value.slice(5, comma).split(";")[0].toLowerCase();
+      if (!["image/jpeg", "image/png", "image/webp"].includes(mime)) continue;
+      imageCount++;
+      mimeTypes.add(mime);
+      encodedCharacters += value.length - comma - 1;
+    }
+  }
+  return { imageCount, mimeTypes: [...mimeTypes].sort(), encodedCharacters };
+}
+
 function cleanContext(context) {
   if (!context || typeof context !== "object" || Array.isArray(context)) {
     return null;
@@ -542,6 +564,17 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
 
     if (previousResponseId) requestBody.previous_response_id = previousResponseId;
 
+    const outgoingImageStats = imageStatsFromResponsesInput(requestBody.input);
+    console.info(JSON.stringify({
+      event: "teuw_multimodal_request",
+      model: selectedModel,
+      imageCount: outgoingImageStats.imageCount,
+      mimeTypes: outgoingImageStats.mimeTypes,
+      encodedCharacters: outgoingImageStats.encodedCharacters,
+      capabilityVerified: selectedCapabilities.verified,
+      capabilitySource: selectedCapabilities.source
+    }));
+
     const openAiResponse = await fetch(OPENAI_RESPONSES_URL, {
       method: "POST",
       headers: {
@@ -551,6 +584,12 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
       body: JSON.stringify(requestBody)
     });
 
+    console.info(JSON.stringify({
+      event: "teuw_multimodal_provider_response",
+      model: selectedModel,
+      httpStatus: openAiResponse.status,
+      imageCount: outgoingImageStats.imageCount
+    }));
     const raw = await openAiResponse.text();
     let data;
     try {
