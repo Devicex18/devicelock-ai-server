@@ -462,6 +462,23 @@ app.post("/v1/ai/verify-key", rateLimit, requireAppToken, async (req, res) => {
   }
 });
 
+/** Bounded diagnostic extraction; never reflect credentials or encoded image data to clients/logs. */
+function safeProviderMessage(value, key) {
+  let message = String(value || "");
+  if (typeof key === "string" && key.length) message = message.split(key).join("[clave oculta]");
+  return message
+    .replace(/sk-(?:proj-)?[A-Za-z0-9_-]{12,}/gi, "[clave oculta]")
+    .replace(/data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, "[datos de imagen omitidos]")
+    .replace(/[A-Za-z0-9+/]{256,}={0,2}/g, "[datos omitidos]")
+    .replace(/[\r\n\t]+/g, " ")
+    .trim()
+    .slice(0, 240);
+}
+
+function safeProviderCode(value) {
+  return String(value || "").replace(/[^A-Za-z0-9_.:\/-]/g, "").slice(0, 80);
+}
+
 // X-OpenAI-Api-Key is used only for the current HTTPS request and is never persisted by this server.
 app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
   try {
@@ -601,20 +618,46 @@ app.post("/v1/ai/chat", rateLimit, requireAppToken, async (req, res) => {
     }
 
     if (!openAiResponse.ok) {
-      // Provider error bodies may echo request fragments. Log only the HTTP status and a
-      // machine-readable error code; never write response bodies or user/image content to logs.
+      const providerError = data?.error && typeof data.error === "object" ? data.error : {};
+      const upstreamStatus = openAiResponse.status;
+      const errorCode = upstreamStatus === 401 || upstreamStatus === 403 ? "openai_auth_error"
+        : upstreamStatus === 429 ? "openai_rate_limit"
+        : upstreamStatus === 404 ? "openai_model_endpoint_error"
+        : upstreamStatus === 413 ? "openai_payload_error"
+        : upstreamStatus >= 500 ? "openai_provider_unavailable"
+        : "openai_error";
+      const providerErrorCode = safeProviderCode(providerError.code);
+      const providerErrorType = safeProviderCode(providerError.type);
+      const providerMessage = safeProviderMessage(providerError.message || data?.message, openAiApiKey);
+      const providerRequestId = safeProviderCode(openAiResponse.headers.get("x-request-id") || openAiResponse.headers.get("request-id"));
+      const clientRequestId = safeProviderCode(req.get("X-Client-Request-Id"));
+      // Safe structured metadata only: no upstream body, prompt, API key or image payload.
       console.error(JSON.stringify({
         event: "teuw_multimodal_provider_error",
-        httpStatus: openAiResponse.status,
-        errorCode: typeof data?.error?.code === "string" ? data.error.code.slice(0, 80) : "provider_error",
-        imageCount: outgoingImageStats.imageCount
+        httpStatus: upstreamStatus,
+        errorCode,
+        providerErrorCode: providerErrorCode || "unknown",
+        providerErrorType: providerErrorType || "unknown",
+        imageCount: outgoingImageStats.imageCount,
+        clientRequestId,
+        providerRequestId: providerRequestId || "unknown"
       }));
-
+      const message = errorCode === "openai_auth_error" ? "OpenAI rechazó la clave API o los permisos de la cuenta."
+        : errorCode === "openai_rate_limit" ? "OpenAI alcanzó un límite de uso o cuota."
+        : errorCode === "openai_model_endpoint_error" ? "El modelo o endpoint configurado no está disponible."
+        : errorCode === "openai_payload_error" ? "El proveedor rechazó el tamaño de la solicitud o de la imagen."
+        : errorCode === "openai_provider_unavailable" ? "OpenAI respondió con un error del servidor."
+        : "El proveedor rechazó la solicitud. Comprueba el formato y la configuración.";
       return res.status(502).json({
         ok: false,
-        error: "openai_error",
-        message: data?.error?.message || "OpenAI rechazó la solicitud.",
-        status: openAiResponse.status
+        error: errorCode,
+        message,
+        status: upstreamStatus,
+        providerErrorCode: providerErrorCode || null,
+        providerErrorType: providerErrorType || null,
+        providerMessage: providerMessage || null,
+        providerRequestId: providerRequestId || null,
+        clientRequestId: clientRequestId || null
       });
     }
 
